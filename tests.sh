@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+DOCKER="${DOCKER:-docker}"
+
 function message {
     echo ""
     echo "---------------------------------------------------------------"
@@ -33,20 +35,12 @@ wait_for_ready() {
 }
 
 stop_and_remove() {
-    docker stop http-echo-tests 2>/dev/null || true
-    for i in {1..20}; do
-        if ! docker ps -aq --filter "name=http-echo-tests" | grep -q .; then
-            return 0
-        fi
-        sleep 0.5
-    done
-    echo "Container failed to stop"; exit 1
+    $DOCKER rm -f http-echo-tests 2>/dev/null || true
 }
 
 cleanup() {
     echo "Cleaning up..."
-    docker stop http-echo-tests 2>/dev/null || true
-    docker rm http-echo-tests 2>/dev/null || true
+    $DOCKER rm -f http-echo-tests 2>/dev/null || true
     popd 2>/dev/null || true
     rm -rf testarea
 }
@@ -61,14 +55,14 @@ fi
 message " Check if we're in Github Actions or local run "
 if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
     echo " Github Actions. Image should already be built."
-    docker images
-    if [[ -z "$(docker images -q justin8/http-https-echo:testing 2> /dev/null)" ]]; then
+    $DOCKER images
+    if [[ -z "$($DOCKER images -q justin8/http-https-echo:testing 2> /dev/null)" ]]; then
         echo "Docker image justin8/http-https-echo:testing not found. Exiting."
         exit 1
     fi
 else
     echo " Local run. Build image "
-    docker build -t justin8/http-https-echo:testing .
+    $DOCKER build -t justin8/http-https-echo:testing .
 fi
 
 
@@ -76,11 +70,11 @@ mkdir -p testarea
 pushd testarea
 
 message " Cleaning up from previous test run "
-docker rm -f http-echo-tests 2>/dev/null || true
+$DOCKER rm -f http-echo-tests 2>/dev/null || true
 stop_and_remove
 
 message " Start container normally "
-docker run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 
@@ -207,7 +201,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with max header size "
-docker run -d --rm -e MAX_HEADER_SIZE=1000 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e MAX_HEADER_SIZE=1000 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 message " Make request with a header within limit."
@@ -238,7 +232,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with additional trusted proxies "
-docker run -d --rm -e ADDITIONAL_TRUSTED_PROXIES="2001:db8::/32,198.51.100.0/24" --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e ADDITIONAL_TRUSTED_PROXIES="2001:db8::/32,198.51.100.0/24" --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 REQUEST=$(curl -s -H "X-Forwarded-For: 203.0.113.10, 198.51.100.1, 2001:db8::1" http://localhost:8080/)
@@ -254,7 +248,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with different internal ports "
-docker run -d --rm -e HTTP_PORT=8888 -e HTTPS_PORT=9999 --name http-echo-tests -p 8080:8888 -p 8443:9999 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e HTTP_PORT=8888 -e HTTPS_PORT=9999 --name http-echo-tests -p 8080:8888 -p 8443:9999 -t justin8/http-https-echo:testing
 wait_for_ready
 
 message " Make http(s) request, and test the path, method and header. "
@@ -285,7 +279,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with empty responses "
-docker run -d --rm -e ECHO_BACK_TO_CLIENT=false --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e ECHO_BACK_TO_CLIENT=false --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 REQUEST=$(curl -s -k http://localhost:8080/a/b/c)
@@ -302,7 +296,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with response body only "
-docker run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 RESPONSE=$(curl -s -k -X POST -d 'cauliflower' http://localhost:8080/a/b/c?response_body_only=true)
 if [[ "$RESPONSE" == "cauliflower" ]]; then
@@ -318,7 +312,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with JWT_HEADER "
-docker run -d --rm -e JWT_HEADER=Authentication --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e JWT_HEADER=Authentication --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 REQUEST=$(curl -s -k -H "Authentication: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" https://localhost:8443/ )
@@ -337,15 +331,15 @@ stop_and_remove
 
 
 message " Start container with LOG_IGNORE_PATH (normal path)"
-docker run -d --rm -e LOG_IGNORE_PATH=/ping --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e LOG_IGNORE_PATH=/ping --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready "/ping"
 
 curl -s -k -X POST -d "banana" https://localhost:8443/ping > /dev/null
 
 # There should be 3 lines, the "listening on...", the /ping ready test, and the /ping POST test. 
-LOG_OUTPUT="$(docker logs http-echo-tests 2>&1)"
+LOG_OUTPUT="$($DOCKER logs http-echo-tests 2>&1)"
 LINE_COUNT=$(( $(wc -l <<< "$LOG_OUTPUT") ))
-if [[ "$LINE_COUNT" == 3 ]] && \
+if [[ "$LINE_COUNT" == 4 ]] && \
     ! grep -q banana <<< "$LOG_OUTPUT"
 then
     passed "LOG_IGNORE_PATH ignored the /ping path"
@@ -359,15 +353,15 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with LOG_IGNORE_PATH (regex path)"
-docker run -d --rm -e LOG_IGNORE_PATH="^\/ping|^\/health|^\/metrics" --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e LOG_IGNORE_PATH="^\/ping|^\/health|^\/metrics" --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready "/health"
 
 curl -s -k -X POST -d "banana" https://localhost:8443/metrics > /dev/null
 
 # There should be 3 lines, the "listening on...", the /health ready test, and the /metrics POST test.
-LOG_OUTPUT="$(docker logs http-echo-tests 2>&1)"
+LOG_OUTPUT="$($DOCKER logs http-echo-tests 2>&1)"
 LINE_COUNT=$(( $(wc -l <<< "$LOG_OUTPUT") ))
-if [[ "$LINE_COUNT" == 3 ]] && \
+if [[ "$LINE_COUNT" == 4 ]] && \
     ! grep -q banana <<< "$LOG_OUTPUT"
 then
     passed "LOG_IGNORE_PATH ignored the /metrics path"
@@ -380,7 +374,7 @@ fi
 # Test a positive case where the path is not ignored
 curl -s -k -X POST -d "strawberry" https://localhost:8443/veryvisible > /dev/null
 
-LOG_OUTPUT="$(docker logs http-echo-tests 2>&1)"
+LOG_OUTPUT="$($DOCKER logs http-echo-tests 2>&1)"
 if grep -q strawberry <<< "$LOG_OUTPUT"
 then
     passed "LOG_IGNORE_PATH didn't ignore the /veryvisible path"
@@ -395,15 +389,15 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with LOG_IGNORE_PATH (ignore all paths) "
-docker run -d --rm -e LOG_IGNORE_PATH=".*" --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e LOG_IGNORE_PATH=".*" --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready "/hello"
 
 curl -s -k -X POST -d "banana" https://localhost:8443/ > /dev/null
 
 # There should be 3 lines, the "listening on", the "/hello" ready test, and the POST banana test. 
-LOG_OUTPUT="$(docker logs http-echo-tests 2>&1)"
+LOG_OUTPUT="$($DOCKER logs http-echo-tests 2>&1)"
 LINE_COUNT=$(( $(wc -l <<< "$LOG_OUTPUT") ))
-if [[ "$LINE_COUNT" == 3 ]] && \
+if [[ "$LINE_COUNT" == 4 ]] && \
     ! grep -q banana <<< "$LOG_OUTPUT"
 then
     passed "LOG_IGNORE_PATH ignored all paths"
@@ -418,11 +412,11 @@ stop_and_remove
 
 
 message " Start container with DISABLE_REQUEST_LOGS "
-docker run -d --rm -e DISABLE_REQUEST_LOGS=true --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e DISABLE_REQUEST_LOGS=true --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready "/healthy"
 
 curl -s -k -X GET https://localhost:8443/strawberry > /dev/null
-LOG_OUTPUT="$(docker logs http-echo-tests 2>&1)"
+LOG_OUTPUT="$($DOCKER logs http-echo-tests 2>&1)"
 if [[ "$(grep -c "GET /strawberry HTTP/1.1" <<< "$LOG_OUTPUT")" -eq 0 ]]
 then
     passed "DISABLE_REQUEST_LOGS disabled Express HTTP logging"
@@ -436,7 +430,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with CORS_CONFIG"
-docker run -d --rm \
+$DOCKER run -d --rm \
     -e CORS_ALLOW_ORIGIN="http://example.com" -e CORS_ALLOW_HEADERS="x-custom-test-header" \
     --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
@@ -449,7 +443,7 @@ if curl -s -i http://localhost:8080/ 2>&1 | grep -q -E \
     passed "CORS_CONFIG expected CORS headers found in response"
 else
     failed "CORS_CONFIG failed."
-    docker logs http-echo-tests
+    $DOCKER logs http-echo-tests
     exit 1
 fi
 
@@ -457,15 +451,15 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with LOG_WITHOUT_NEWLINE "
-docker run -d --rm -e LOG_WITHOUT_NEWLINE=1 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e LOG_WITHOUT_NEWLINE=1 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 curl -s -k -X POST -d "tiramisu" https://localhost:8443/ > /dev/null
 
 # There will be 4 lines, the Listening on, the / ready test and response, the POST test and response
-LOG_OUTPUT="$(docker logs http-echo-tests 2>&1)"
+LOG_OUTPUT="$($DOCKER logs http-echo-tests 2>&1)"
 LINE_COUNT=$(( $(wc -l <<< "$LOG_OUTPUT") ))
-if [[ "$LINE_COUNT" == 5 ]] && \
+if [[ "$LINE_COUNT" == 6 ]] && \
     grep -q tiramisu <<< "$LOG_OUTPUT"
 then
     passed "LOG_WITHOUT_NEWLINE logged output in single line"
@@ -480,9 +474,9 @@ message " Stop containers "
 stop_and_remove
 
 message " Check that container is running as a NON ROOT USER by default"
-docker run -d --name http-echo-tests --rm justin8/http-https-echo:testing
+$DOCKER run -d --name http-echo-tests --rm justin8/http-https-echo:testing
 
-WHOAMI=$(docker exec http-echo-tests whoami)
+WHOAMI=$($DOCKER exec http-echo-tests whoami)
 
 if [[ "$WHOAMI" == "node" ]]
 then
@@ -500,7 +494,7 @@ message " Check that mTLS server responds with client certificate details"
 openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes -keyout testpk.pem -out fullchain.pem \
        -subj "/CN=client.example.net" \
        -addext "subjectAltName=DNS:client.example.net"
-docker run -d --rm -e MTLS_ENABLE=1 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e MTLS_ENABLE=1 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 COMMON_NAME="$(curl -sk --cert fullchain.pem --key testpk.pem  https://localhost:8443/ | jq -r  '.clientCertificate.subject.CN')"
@@ -548,7 +542,7 @@ chmod a+r "${https_cert_file}"
 chmod a+r "${https_key_file}"
 container_https_cert_file="/test/tls.crt"
 container_https_key_file="/test/tls.key"
-docker run -d --rm \
+$DOCKER run -d --rm \
   -v "${https_cert_file}:${container_https_cert_file}:ro,z" \
   -e HTTPS_CERT_FILE="${container_https_cert_file}" \
   -v "${https_key_file}:${container_https_key_file}:ro,z" \
@@ -570,7 +564,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Check that environment variables returned in response if enabled"
-docker run -d --rm -e ECHO_INCLUDE_ENV_VARS=1 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -e ECHO_INCLUDE_ENV_VARS=1 --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 RESPONSE_BODY="$(curl -sk https://localhost:8443/ | jq -r  '.env.ECHO_INCLUDE_ENV_VARS')"
@@ -587,7 +581,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Check that environment variables are not present in response by default"
-docker run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 RESPONSE_BODY_ENV_CHECK="$(curl -sk https://localhost:8443/ | jq 'has("env")')"
@@ -604,7 +598,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with PROMETHEUS disabled "
-docker run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 curl -s -k -X POST -d "tiramisu" https://localhost:8443/ > /dev/null
@@ -625,7 +619,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with PROMETHEUS enabled "
-docker run -d -e PROMETHEUS_ENABLED=true --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d -e PROMETHEUS_ENABLED=true --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 curl -s -k -X POST -d "tiramisu" https://localhost:8443/ > /dev/null
@@ -645,7 +639,7 @@ message " Stop containers "
 stop_and_remove
 
 message " Start container with PRESERVE_HEADER_CASE enabled "
-docker run -d -e PRESERVE_HEADER_CASE=true --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d -e PRESERVE_HEADER_CASE=true --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 HEADER_CASE_CHECK=$(curl -s -H "prEseRVe-CaSE: A1b2C3" -H 'x-a-b: 999'  -H 'X-a-B: 13'  localhost:8080 | jq -r '.headers."prEseRVe-CaSE"')
@@ -662,7 +656,7 @@ stop_and_remove
 
 message " Start container with a custom response body from a file "
 echo "<h1>Hello World</h1>" > test.html
-docker run -d --rm -v "${PWD}/test.html:/app/test.html" --name http-echo-tests -p 8080:8080 -e OVERRIDE_RESPONSE_BODY_FILE_PATH=/test.html -t justin8/http-https-echo:testing
+$DOCKER run -d --rm -v "${PWD}/test.html:/app/test.html" --name http-echo-tests -p 8080:8080 -e OVERRIDE_RESPONSE_BODY_FILE_PATH=/test.html -t justin8/http-https-echo:testing
 wait_for_ready
 
 RESPONSE_BODY=$(curl -s http://localhost:8080)
@@ -679,7 +673,7 @@ stop_and_remove
 
 message " Start container with signed cookies support "
 # Set cookie secret for signing/verifying cookies
-docker run -d --rm -e COOKIE_SECRET=mysecretkey123 \
+$DOCKER run -d --rm -e COOKIE_SECRET=mysecretkey123 \
     --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
@@ -710,7 +704,7 @@ stop_and_remove
 
 
 message " Check that regular cookies are returned in response "
-docker run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
+$DOCKER run -d --rm --name http-echo-tests -p 8080:8080 -p 8443:8443 -t justin8/http-https-echo:testing
 wait_for_ready
 
 
