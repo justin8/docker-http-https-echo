@@ -1,3 +1,10 @@
+## Version `42` - 2026-07-19
+* Added a real-time web-based log streaming dashboard on port `8081` (configurable via `LOG_SERVER_PORT`).
+* Captures standard and Morgan logs in the container and displays them as colorized lines or interactive collapsible JSON request trees.
+* Optimized server shutdown processes with instant connection termination for keep-alive and SSE clients.
+* Updated CI/CD publish workflows to push the `latest` tag on every commit to `master` and tag releases on Git tags.
+* Refactored local testing environment to support standard `$DOCKER` environment variables (e.g., using macOS native `container` command) with direct container removal (`rm -f`).
+
 ## Version `41` - 2026-06-14
 * Added support for additional trusted proxies via `ADDITIONAL_TRUSTED_PROXIES` by [JackMyers001](https://github.com/justin8/docker-http-https-echo/pull/101)
 * Express update includes the new way of catching all paths
