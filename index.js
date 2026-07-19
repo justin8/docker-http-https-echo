@@ -245,15 +245,45 @@ process.on('SIGINT', shutDown);
 process.on('SIGTERM', shutDown);
 
 function shutDown(){
+  if (calledClose) {
+    console.log('Got another kill signal. Force exiting immediately.');
+    process.exit(1);
+  }
+
   console.log('Got a kill signal. Trying to exit gracefully.');
   calledClose = true;
-  httpServer.close(function() {
-    httpsServer.close(function() {
-      logServer.close(function() {
-        stopIntercept();
-        console.log("HTTP, HTTPS, and Log servers closed. Asking process to exit.");
-        process.exit()
-      });
-    });
-  });
+
+  // Set a fallback force-exit timeout (e.g., 2 seconds) in case of hanging connections
+  const forceExitTimeout = setTimeout(() => {
+    console.log('Graceful shutdown timed out. Force exiting...');
+    stopIntercept();
+    process.exit(0);
+  }, 2000);
+  forceExitTimeout.unref();
+
+  // Instantly close all open sockets (supported in Node 18.2+)
+  if (typeof httpServer.closeAllConnections === 'function') {
+    httpServer.closeAllConnections();
+  }
+  if (typeof httpsServer.closeAllConnections === 'function') {
+    httpsServer.closeAllConnections();
+  }
+  if (typeof logServer.closeAllConnections === 'function') {
+    logServer.closeAllConnections();
+  }
+
+  let closedCount = 0;
+  const checkExit = () => {
+    closedCount++;
+    if (closedCount === 3) {
+      clearTimeout(forceExitTimeout);
+      stopIntercept();
+      console.log("HTTP, HTTPS, and Log servers closed. Asking process to exit.");
+      process.exit(0);
+    }
+  };
+
+  httpServer.close(checkExit);
+  httpsServer.close(checkExit);
+  logServer.close(checkExit);
 }
