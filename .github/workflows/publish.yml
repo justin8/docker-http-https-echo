@@ -46,8 +46,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            mendhak/http-https-echo
-            ghcr.io/mendhak/http-https-echo
+            justin8/http-https-echo
+            ghcr.io/justin8/http-https-echo
 
       - name: Build and push image
         uses: docker/build-push-action@v5

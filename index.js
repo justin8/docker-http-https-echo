@@ -227,14 +227,18 @@ var httpServer = http.createServer(httpOpts, app).listen(process.env.HTTP_PORT |
 var httpsServer = https.createServer(httpsOpts,app).listen(process.env.HTTPS_PORT || 8443);
 console.log(`Listening on ports ${process.env.HTTP_PORT || 8080} for http, and ${process.env.HTTPS_PORT || 8443} for https.`);
 
+const { initLogViewer, stopIntercept } = require('./logViewer');
+const logServer = initLogViewer();
+
 let calledClose = false;
 
 process.on('exit', function () {
   if (calledClose) return;
-  console.log('Got exit event. Trying to stop Express server.');
-  server.close(function() {
-    console.log("Express server closed");
-  });
+  console.log('Got exit event. Trying to stop Express servers.');
+  stopIntercept();
+  httpServer.close();
+  httpsServer.close();
+  logServer.close();
 });
 
 process.on('SIGINT', shutDown);
@@ -245,8 +249,11 @@ function shutDown(){
   calledClose = true;
   httpServer.close(function() {
     httpsServer.close(function() {
-      console.log("HTTP and HTTPS servers closed. Asking process to exit.");
-      process.exit()
+      logServer.close(function() {
+        stopIntercept();
+        console.log("HTTP, HTTPS, and Log servers closed. Asking process to exit.");
+        process.exit()
+      });
     });
   });
 }

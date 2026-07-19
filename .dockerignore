@@ -4,5 +4,6 @@
 # Except
 !generate-cert.sh
 !index.js
+!logViewer.js
 !package.json
 !package-lock.json

@@ -47,7 +47,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            mendhak/http-https-echo
+            justin8/http-https-echo
 
       # Commenting out, possible bug: https://github.com/nodejs/docker-node/issues/1946
       # - name: Build the image multi-platform
@@ -72,7 +72,7 @@ jobs:
           cache-to: type=gha,mode=max
           tags: |
             ${{ steps.meta.outputs.tags }}
-            "mendhak/http-https-echo:testing"
+            "justin8/http-https-echo:testing"
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Run tests using the test image
@@ -82,7 +82,7 @@ jobs:
         id: scan
         uses: anchore/scan-action@v7
         with:
-          image: "mendhak/http-https-echo:testing"
+          image: "justin8/http-https-echo:testing"
           output-format: sarif
           # severity-cutoff: critical
           fail-build: false

@@ -1,12 +1,12 @@
 ## Version `41` - 2026-06-14
-* Added support for additional trusted proxies via `ADDITIONAL_TRUSTED_PROXIES` by [JackMyers001](https://github.com/mendhak/docker-http-https-echo/pull/101)
+* Added support for additional trusted proxies via `ADDITIONAL_TRUSTED_PROXIES` by [JackMyers001](https://github.com/justin8/docker-http-https-echo/pull/101)
 * Express update includes the new way of catching all paths
 
 ## Version `40` - 2026-03-20
 * Echo back cookies and signed cookies
 
 ## Version `39` - 2026-01-09
-* Renamed privkey.pem to testpk.pem so Trivy doesn't flag a false positive by [willyguggenheim](https://github.com/mendhak/docker-http-https-echo/pull/89) 
+* Renamed privkey.pem to testpk.pem so Trivy doesn't flag a false positive by [willyguggenheim](https://github.com/justin8/docker-http-https-echo/pull/89) 
 * Updated dependencies in package.json
 * Removed `/usr/local/lib/node_modules` from image to reduce CVE footprint
 
@@ -17,7 +17,7 @@
 * The `LOG_IGNORE_PATH` environment variable now takes a regex, so you can ignore multiple paths.
 
 ## Version `36` - 2025-03-22
-* Basic handling of gzip content-encoding on requests by [matt-mercer](https://github.com/mendhak/docker-http-https-echo/pull/79)
+* Basic handling of gzip content-encoding on requests by [matt-mercer](https://github.com/justin8/docker-http-https-echo/pull/79)
 
 ## Version `35` - 2024-10-19
 * Error handling for when invalid JSON body is passed in
@@ -27,7 +27,7 @@
 * Set `OVERRIDE_RESPONSE_BODY_FILE_PATH` to a path, to override the response body with the contents of that file. 
 
 ## Version `33` - 2024-04-07
-* Implementing configurable CORS settings by [ash0ne](https://github.com/mendhak/docker-http-https-echo/pull/65). 
+* Implementing configurable CORS settings by [ash0ne](https://github.com/justin8/docker-http-https-echo/pull/65). 
 
 ## Version `32` - 2024-03-28
 * Update Express to 4.19.2 to address CVE-2024-29041
@@ -39,7 +39,7 @@
 * Use `HTTPS_CERT_FILE` and `HTTPS_KEY_FILE` to specify path to a certificate. 
 
 ## Version `29` - 2023-03-16
-* Publishing this image to Github Container Registry. Available at `docker pull ghcr.io/mendhak/http-https-echo:latest`
+* Publishing this image to Github Container Registry. Available at `docker pull ghcr.io/justin8/http-https-echo:latest`
 
 ## Version `28` - 2022-12-02
 * Certificate now includes Subject Alternative Names as well as Common Name
@@ -77,7 +77,7 @@
 
 ## Version `20` - 2021-09-27
 
-* The image is available for multiple architectures.  This is being done via [docker buildx](https://github.com/mendhak/docker-http-https-echo/blob/9f511eae7c928d7f9543842598f9565c19828300/.github/workflows/publish.yml#L32) on Github Actions.
+* The image is available for multiple architectures.  This is being done via [docker buildx](https://github.com/justin8/docker-http-https-echo/blob/9f511eae7c928d7f9543842598f9565c19828300/.github/workflows/publish.yml#L32) on Github Actions.
 
 ## Version `19` - 2021-04-08
 
@@ -105,9 +105,9 @@
 * Optionally allow running as a non root user. 
 
 ```
-docker run --user node -e HTTP_PORT=8080 -e HTTPS_PORT=8443 -p 8080:8080 -p 8443:8443 --rm mendhak/http-https-echo:issue-14-non-root
+docker run --user node -e HTTP_PORT=8080 -e HTTPS_PORT=8443 -p 8080:8080 -p 8443:8443 --rm justin8/http-https-echo:issue-14-non-root
 #or
-docker run --user node --sysctl net.ipv4.ip_unprivileged_port_start=0 -p 8080:80 -p 8443:443 --rm mendhak/http-https-echo:issue-14-non-root
+docker run --user node --sysctl net.ipv4.ip_unprivileged_port_start=0 -p 8080:80 -p 8443:443 --rm justin8/http-https-echo:issue-14-non-root
 ```
 
 ## Version `latest` and others
