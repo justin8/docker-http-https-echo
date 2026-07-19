@@ -380,6 +380,10 @@ You can configure these metrics using the following variables:
 
 ![dockerlogs](./screenshots/screenshot3.png)
 
+#### Web log viewer output
+
+![logviewer](./screenshots/screenshot4.png)
+
 
 
 ## Building and developing locally
