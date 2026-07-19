@@ -1,6 +1,6 @@
 [![pulls](https://img.shields.io/docker/pulls/justin8/http-https-echo.svg?style=for-the-badge&logo=docker)](https://hub.docker.com/r/justin8/http-https-echo)
 [![Docker Image Version (latest semver)](https://img.shields.io/docker/v/justin8/http-https-echo?color=lightblue&label=latest&sort=semver&style=for-the-badge)](https://hub.docker.com/r/justin8/http-https-echo)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/justin8/docker-http-https-echo/build.yml?color=darkgreen&style=for-the-badge&branch=master)](https://github.com/justin8/docker-http-https-echo/actions?query=workflow%3ABuild)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/justin8/docker-http-https-echo/build.yml?color=darkgreen&style=for-the-badge&branch=main)](https://github.com/justin8/docker-http-https-echo/actions?query=workflow%3ABuild)
 
 
 `justin8/http-https-echo` is a Docker image that can echo various HTTP request properties back to client in the response, as well as in the Docker container logs.

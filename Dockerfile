@@ -24,7 +24,7 @@ LABEL \
     org.opencontainers.image.title="http-https-echo" \
     org.opencontainers.image.description="Docker image that echoes request data as JSON; listens on HTTP/S, with various extra features, useful for debugging." \
     org.opencontainers.image.url="https://github.com/justin8/docker-http-https-echo" \
-    org.opencontainers.image.documentation="https://github.com/justin8/docker-http-https-echo/blob/master/README.md" \
+    org.opencontainers.image.documentation="https://github.com/justin8/docker-http-https-echo/blob/main/README.md" \
     org.opencontainers.image.source="https://github.com/justin8/docker-http-https-echo" \
     org.opencontainers.image.licenses="MIT"
 WORKDIR /app
