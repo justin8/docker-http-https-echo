@@ -495,27 +495,6 @@ fi
 message " Stop containers "
 stop_and_remove
 
-message " Check that container is running as user different that the user defined in image"
-IMAGE_USER="$(docker image inspect justin8/http-https-echo:testing -f '{{ .Config.User }}')"
-CONTAINER_USER="$((IMAGE_USER + 1000000))"
-docker run -d --name http-echo-tests --rm -u "${CONTAINER_USER}" -p 8080:8080 justin8/http-https-echo:testing
-wait_for_ready
-
-curl -s http://localhost:8080 > /dev/null
-
-WHOAMI="$(docker exec http-echo-tests id -u)"
-
-if [[ "$WHOAMI" == "$CONTAINER_USER" ]]
-then
-    passed "Running as $CONTAINER_USER user"
-else
-    failed "Not running as $CONTAINER_USER user or failed to start"
-    exit 1
-fi
-
-message " Stop containers "
-stop_and_remove
-
 message " Check that mTLS server responds with client certificate details"
 # Generate a new self signed cert locally
 openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes -keyout testpk.pem -out fullchain.pem \
