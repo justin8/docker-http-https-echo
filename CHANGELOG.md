@@ -1,3 +1,8 @@
+## Version `43` - 2026-07-20
+* Updated real-time web log viewer UI with responsive mobile view and sidebar minimization.
+* Streamlined HTTP request log output into a single expandable JSON entry with response status code in header.
+* Suppressed duplicate Morgan access text log lines in the log streamer interface.
+
 ## Version `42` - 2026-07-19
 * Added a real-time web-based log streaming dashboard on port `8081` (configurable via `LOG_SERVER_PORT`).
 * Captures standard and Morgan logs in the container and displays them as colorized lines or interactive collapsible JSON request trees.

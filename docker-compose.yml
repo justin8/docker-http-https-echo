@@ -1,7 +1,7 @@
 version: '3'
 services:
     my-http-listener:
-        image: justin8/http-https-echo:42
+        image: justin8/http-https-echo:43
         environment:
             - HTTP_PORT=8888
             - HTTPS_PORT=9999
