@@ -20,78 +20,124 @@ function consoleErrorDirect(msg) {
   originalStderrWrite.call(process.stderr, msg + '\n');
 }
 
-/**
- * Buffers chunks and extracts complete lines.
- * If a line is a JSON log, it parses it to send it structured.
- */
-function handleStreamChunk(chunk, isErrorStream = false) {
+function processBuffer(isErrorStream = false) {
   const streamType = isErrorStream ? 'error' : 'text';
-  
-  // Check if the entire incoming chunk is a complete JSON object (e.g. multi-line request echo)
-  const trimmedChunk = chunk.trim();
-  if (trimmedChunk.startsWith('{') && trimmedChunk.endsWith('}')) {
-    try {
-      const parsed = JSON.parse(trimmedChunk);
-      const logItem = {
-        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toISOString(),
-        type: 'json',
-        data: parsed,
-        raw: chunk
-      };
-      saveAndBroadcast(logItem);
-      return;
-    } catch (e) {
-      // Fall through to regular line-buffering if parsing fails
-    }
-  }
-
   let buffer = isErrorStream ? stderrBuffer : stdoutBuffer;
-  buffer += chunk;
-  const lines = buffer.split('\n');
-  
-  // Keep the last part if it doesn't end with a newline
-  if (isErrorStream) {
-    stderrBuffer = lines.pop();
-  } else {
-    stdoutBuffer = lines.pop();
-  }
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === '') continue;
-    
-    let logItem;
-    // Check if the single line itself is a complete JSON object
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+  let str = buffer.trim();
+  if (!str) return;
+
+  // Try parsing complete JSON block from buffer if it starts with {
+  if (str.startsWith('{')) {
+    const lastBrace = str.lastIndexOf('}');
+    if (lastBrace !== -1) {
+      const jsonCandidate = str.substring(0, lastBrace + 1);
       try {
-        const parsed = JSON.parse(trimmed);
-        logItem = {
+        const parsed = JSON.parse(jsonCandidate);
+        saveAndBroadcast({
           id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
           timestamp: new Date().toISOString(),
           type: 'json',
           data: parsed,
-          raw: line
-        };
+          raw: jsonCandidate
+        });
+        const remaining = str.substring(lastBrace + 1).trimStart();
+        if (isErrorStream) stderrBuffer = remaining;
+        else stdoutBuffer = remaining;
+        if (remaining.length > 0) processBuffer(isErrorStream);
+        return;
       } catch (e) {
-        // Fall back to text log if JSON parsing fails
+        // Multi-line JSON is incomplete or invalid, wait for more chunks or fallback if buffer gets huge
       }
     }
-    
-    if (!logItem) {
-      logItem = {
-        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
-        timestamp: new Date().toISOString(),
-        type: streamType,
-        text: line
-      };
+    if (buffer.length < 50000) {
+      return; // Waiting for complete JSON object
     }
-    
-    saveAndBroadcast(logItem);
+  }
+
+  // Line splitting for standard text logs
+  const lines = buffer.split('\n');
+  const remainder = lines.pop() || '';
+  if (isErrorStream) stderrBuffer = remainder;
+  else stdoutBuffer = remainder;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        saveAndBroadcast({
+          id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toISOString(),
+          type: 'json',
+          data: JSON.parse(trimmed),
+          raw: line
+        });
+        continue;
+      } catch (e) {}
+    }
+    saveAndBroadcast({
+      id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+      timestamp: new Date().toISOString(),
+      type: streamType,
+      text: line
+    });
   }
 }
 
+/**
+ * Buffers chunks and extracts complete lines / multi-line JSON.
+ */
+function handleStreamChunk(chunk, isErrorStream = false) {
+  if (isErrorStream) {
+    stderrBuffer += chunk;
+  } else {
+    stdoutBuffer += chunk;
+  }
+  processBuffer(isErrorStream);
+}
+
+function isHttpAccessLog(text) {
+  if (!text) return false;
+  const str = text.trim();
+  return /\\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\b\\s+\\/i.test(str) ||
+             /"(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\s+\\S+/i.test(str);
+}
+
+function parseMorganLog(text) {
+  if (!text) return null;
+  const morganRegex = /^(\\S+) - \\S+ \\[(.*?)\\] "([A-Z]+) (\\S+)(?: (.*?))?" (\\d{3}) (\\S+)/;
+  const match = text.trim().match(morganRegex);
+  if (!match) return null;
+  return {
+    ip: match[1],
+    timestamp: match[2],
+    method: match[3],
+    path: match[4],
+    protocol: match[5] || 'HTTP/1.1',
+    status: parseInt(match[6], 10),
+    size: match[7]
+  };
+}
+
 function saveAndBroadcast(logItem) {
+  // Suppress HTTP access text log lines from being saved or broadcast as separate text logs
+  if (logItem.type === 'text' && isHttpAccessLog(logItem.text)) {
+    const morganData = parseMorganLog(logItem.text);
+    if (morganData) {
+      const morganBasePath = morganData.path.split('?')[0];
+      for (let i = logHistory.length - 1; i >= 0; i--) {
+        const item = logHistory[i];
+        if (item.type === 'json' && (item.data.path || '/').split('?')[0] === morganBasePath) {
+          item.data.status = morganData.status;
+          item.data.size = morganData.size;
+          item.data.protocol = morganData.protocol;
+          break;
+        }
+      }
+    }
+    return; // DO NOT save or broadcast Morgan HTTP access text log line!
+  }
+
   logHistory.push(logItem);
   if (logHistory.length > MAX_LOG_HISTORY) {
     logHistory.shift();
@@ -107,19 +153,30 @@ function saveAndBroadcast(logItem) {
   });
 }
 
+let isWritingLog = false;
 /**
  * Intercept stdout and stderr writes.
  */
 function startIntercept() {
   process.stdout.write = function (chunk, encoding, callback) {
-    const str = chunk.toString();
-    handleStreamChunk(str, false);
+    if (isWritingLog) return originalStdoutWrite.apply(process.stdout, arguments);
+    isWritingLog = true;
+    try {
+      handleStreamChunk(chunk.toString(), false);
+    } finally {
+      isWritingLog = false;
+    }
     return originalStdoutWrite.apply(process.stdout, arguments);
   };
   
   process.stderr.write = function (chunk, encoding, callback) {
-    const str = chunk.toString();
-    handleStreamChunk(str, true);
+    if (isWritingLog) return originalStderrWrite.apply(process.stderr, arguments);
+    isWritingLog = true;
+    try {
+      handleStreamChunk(chunk.toString(), true);
+    } finally {
+      isWritingLog = false;
+    }
     return originalStderrWrite.apply(process.stderr, arguments);
   };
 }
@@ -142,9 +199,6 @@ function getHTMLContent() {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HTTP/HTTPS Echo Log Streamer</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-color: #0b0f19;
@@ -175,7 +229,7 @@ function getHTMLContent() {
     body {
       background-color: var(--bg-color);
       color: var(--text-main);
-      font-family: 'Inter', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       overflow: hidden;
       height: 100vh;
       display: flex;
@@ -764,6 +818,169 @@ function getHTMLContent() {
       stroke: #10b981;
       stroke-width: 2.5;
     }
+
+    /* Sidebar Minimize/Expand styling */
+    .sidebar-toggle-card {
+      width: 100%;
+    }
+
+    .btn-minimize {
+      width: 100%;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.55rem 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      border-radius: 0.5rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+    }
+
+    .btn-minimize:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .btn-back-sidebar {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 0.3rem 0.65rem;
+      border-radius: 0.375rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: none; /* Hidden when sidebar is open */
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.2s;
+    }
+
+    .btn-back-sidebar:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-mobile-toggle-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      color: #c084fc;
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-mobile-toggle-badge:hover {
+      background: rgba(139, 92, 246, 0.35);
+      color: white;
+    }
+
+    .terminal-header-title {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    /* When sidebar is collapsed / minimized */
+    main.sidebar-collapsed .sidebar {
+      display: none !important;
+    }
+
+    main.sidebar-collapsed .btn-back-sidebar {
+      display: inline-flex !important;
+    }
+
+    /* Desktop Layout */
+    @media (min-width: 769px) {
+      main {
+        display: grid;
+        grid-template-columns: 290px 1fr;
+      }
+
+      main.sidebar-collapsed {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: flex;
+      }
+
+      .terminal-container {
+        display: flex;
+      }
+    }
+
+    /* Mobile Layout */
+    @media (max-width: 768px) {
+      header {
+        padding: 0.75rem 1rem;
+      }
+
+      .title-area h1 {
+        font-size: 1rem;
+      }
+
+      .title-area p {
+        font-size: 0.7rem;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      .sidebar {
+        width: 100%;
+        height: 100%;
+        flex: 1;
+        border-right: none;
+        padding: 1rem;
+        display: flex;
+      }
+
+      .terminal-container {
+        width: 100%;
+        height: 100%;
+        flex: 1;
+        display: none;
+      }
+
+      main.sidebar-collapsed .sidebar {
+        display: none !important;
+      }
+
+      main.sidebar-collapsed .terminal-container {
+        display: flex !important;
+      }
+
+      .terminal-header {
+        padding: 0.5rem 1rem;
+      }
+
+      .terminal-body {
+        padding: 1rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .title-area p {
+        display: none;
+      }
+    }
   </style>
 </head>
 <body>
@@ -781,6 +998,9 @@ function getHTMLContent() {
     </div>
     
     <div class="header-actions">
+      <button id="btn-header-toggle" class="btn-mobile-toggle-badge" aria-label="Toggle sidebar view">
+        <span id="header-toggle-label">Minimize Sidebar</span>
+      </button>
       <div class="status-badge">
         <div id="status-dot" class="status-dot disconnected"></div>
         <span id="status-text">Disconnected</span>
@@ -788,8 +1008,15 @@ function getHTMLContent() {
     </div>
   </header>
 
-  <main>
-    <div class="sidebar">
+  <main id="main-content">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-toggle-card">
+        <button class="btn btn-minimize" id="btn-minimize-sidebar" title="Minimize Sidebar">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+          <span>Minimize</span>
+        </button>
+      </div>
+
       <div class="stats-grid">
         <div class="stat-card total">
           <span class="stat-title">Total Logs</span>
@@ -869,7 +1096,13 @@ function getHTMLContent() {
 
     <div class="terminal-container">
       <div class="terminal-header">
-        <span>CONSOLE OUTPUT</span>
+        <div class="terminal-header-title">
+          <button class="btn-back-sidebar" id="btn-show-sidebar" aria-label="Expand sidebar">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>
+            <span>Expand Sidebar</span>
+          </button>
+          <span>CONSOLE OUTPUT</span>
+        </div>
         <div class="terminal-controls">
           <span id="rendered-count">Showing 0 logs</span>
         </div>
@@ -929,6 +1162,36 @@ function getHTMLContent() {
     const btnTestRequest = document.getElementById('btn-test-request');
     const toast = document.getElementById('toast');
 
+    // Sidebar Toggle elements
+    const mainContent = document.getElementById('main-content');
+    const btnMinimizeSidebar = document.getElementById('btn-minimize-sidebar');
+    const btnShowSidebar = document.getElementById('btn-show-sidebar');
+    const btnHeaderToggle = document.getElementById('btn-header-toggle');
+    const headerToggleLabel = document.getElementById('header-toggle-label');
+
+    function updateSidebarCollapseState(collapsed) {
+      if (collapsed) {
+        mainContent.classList.add('sidebar-collapsed');
+        if (headerToggleLabel) headerToggleLabel.textContent = 'Expand Sidebar';
+      } else {
+        mainContent.classList.remove('sidebar-collapsed');
+        if (headerToggleLabel) headerToggleLabel.textContent = 'Minimize Sidebar';
+      }
+    }
+
+    if (btnMinimizeSidebar) {
+      btnMinimizeSidebar.onclick = () => updateSidebarCollapseState(true);
+    }
+    if (btnShowSidebar) {
+      btnShowSidebar.onclick = () => updateSidebarCollapseState(false);
+    }
+    if (btnHeaderToggle) {
+      btnHeaderToggle.onclick = () => {
+        const isCollapsed = mainContent.classList.contains('sidebar-collapsed');
+        updateSidebarCollapseState(!isCollapsed);
+      };
+    }
+
     // Initialize EventSource
     let eventSource;
     function connectSSE() {
@@ -952,16 +1215,7 @@ function getHTMLContent() {
       eventSource.onmessage = (event) => {
         try {
           const logItem = JSON.parse(event.data);
-          allLogs.push(logItem);
-          if (allLogs.length > 2000) {
-            allLogs.shift();
-          }
-          
-          updateSidebarStats();
-          
-          if (shouldShowLog(logItem)) {
-            appendLog(logItem);
-          }
+          processIncomingLog(logItem);
         } catch (e) {
           console.error("Failed to parse log", e);
         }
@@ -970,6 +1224,143 @@ function getHTMLContent() {
     
     connectSSE();
 
+    function isHttpAccessLog(text) {
+      if (!text) return false;
+      return new RegExp('(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\\\\s+/', 'i').test(text);
+    }
+
+    // Morgan log parser
+    function parseMorganLog(text) {
+      if (!text) return null;
+      // Regex pattern matching: ::ffff:127.0.0.1 - - [19/Jul/2026:12:00:00 +0000] "GET /test HTTP/1.1" 200 458
+      const morganRegex = new RegExp('^(\\\\S+) - \\\\S+ \\\\[(.*?)\\\\] "([A-Z]+) (\\\\S+)(?: (.*?))?" (\\\\d{3}) (\\\\S+)');
+      const match = text.trim().match(morganRegex);
+      if (!match) return null;
+      return {
+        ip: match[1],
+        timestamp: match[2],
+        method: match[3],
+        path: match[4],
+        protocol: match[5] || 'HTTP/1.1',
+        status: parseInt(match[6], 10),
+        size: match[7]
+      };
+    }
+
+    function buildJsonSummaryHTML(data) {
+      const method = (data.method || 'GET').toUpperCase();
+      const path = data.path || '/';
+      const ip = data.ip || '127.0.0.1';
+      
+      let status = data.status;
+      if (status === undefined || status === null) {
+        if (data.headers && (data.headers['x-set-response-status-code'] || data.headers['X-Set-Response-Status-Code'])) {
+          status = parseInt(data.headers['x-set-response-status-code'] || data.headers['X-Set-Response-Status-Code'], 10);
+        } else if (data.query && data.query['x-set-response-status-code']) {
+          status = parseInt(data.query['x-set-response-status-code'], 10);
+        } else {
+          status = 200;
+        }
+      }
+
+      let statusClass = 'status-2xx';
+      const statusStr = String(status);
+      if (statusStr.startsWith('3')) statusClass = 'status-3xx';
+      if (statusStr.startsWith('4')) statusClass = 'status-4xx';
+      if (statusStr.startsWith('5')) statusClass = 'status-5xx';
+
+      const statusHTML = ' <span class="log-status ' + statusClass + '">' + status + '</span>';
+      const sizeHTML = data.size ? ' <span class="log-size">(' + data.size + 'B)</span>' : '';
+      const protoHTML = data.protocol ? ' <span class="log-proto">' + data.protocol + '</span>' : '';
+
+      return '<span class="log-method method-' + method.toLowerCase() + '">' + method + '</span> <span class="log-path">' + path + '</span>' + protoHTML + statusHTML + sizeHTML + ' <span style="color:var(--text-muted); font-size: 0.75rem;">from ' + ip + '</span>';
+    }
+
+    const pendingMorganLogs = [];
+
+    function findMatchingJsonLog(morganData) {
+      const morganBasePath = morganData.path.split('?')[0];
+      for (let i = allLogs.length - 1; i >= 0; i--) {
+        const item = allLogs[i];
+        if (item.type !== 'json' || item.data.status !== undefined) continue;
+        const jsonMethod = (item.data.method || 'GET').toUpperCase();
+        const jsonBasePath = (item.data.path || '/').split('?')[0];
+        if (jsonMethod === morganData.method.toUpperCase() && jsonBasePath === morganBasePath) {
+          return item;
+        }
+      }
+      return null;
+    }
+
+    function findPendingMorganIndex(jsonData) {
+      const jsonMethod = (jsonData.method || 'GET').toUpperCase();
+      const jsonBasePath = (jsonData.path || '/').split('?')[0];
+      for (let i = pendingMorganLogs.length - 1; i >= 0; i--) {
+        const m = pendingMorganLogs[i];
+        const morganBasePath = m.path.split('?')[0];
+        if (m.method.toUpperCase() === jsonMethod && morganBasePath === jsonBasePath) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    function updateJsonLogRow(logItem) {
+      const row = document.getElementById(logItem.id);
+      if (!row) return;
+      
+      const summary = row.querySelector('.json-summary');
+      if (summary) {
+        summary.innerHTML = buildJsonSummaryHTML(logItem.data);
+      }
+      
+      const tree = row.querySelector('.json-tree');
+      if (tree) {
+        tree.innerHTML = renderJsonVal(logItem.data);
+      }
+    }
+
+    function processIncomingLog(logItem) {
+      if (logItem.type === 'text') {
+        if (isHttpAccessLog(logItem.text)) {
+          const morganData = parseMorganLog(logItem.text);
+          if (morganData) {
+            const matchedJson = findMatchingJsonLog(morganData);
+            if (matchedJson) {
+              matchedJson.data.status = morganData.status;
+              matchedJson.data.size = morganData.size;
+              matchedJson.data.protocol = morganData.protocol;
+              updateJsonLogRow(matchedJson);
+              updateSidebarStats();
+            } else {
+              pendingMorganLogs.push(morganData);
+              if (pendingMorganLogs.length > 50) pendingMorganLogs.shift();
+            }
+          }
+          return; // Suppress HTTP access text log line completely!
+        }
+      } else if (logItem.type === 'json') {
+        const pendingIdx = findPendingMorganIndex(logItem.data);
+        if (pendingIdx !== -1) {
+          const morganData = pendingMorganLogs.splice(pendingIdx, 1)[0];
+          logItem.data.status = morganData.status;
+          logItem.data.size = morganData.size;
+          logItem.data.protocol = morganData.protocol;
+        }
+      }
+
+      allLogs.push(logItem);
+      if (allLogs.length > 2000) {
+        allLogs.shift();
+      }
+      
+      updateSidebarStats();
+      
+      if (shouldShowLog(logItem)) {
+        appendLog(logItem);
+      }
+    }
+
     // Stats calculations
     function getLogStats() {
       let totals = { all: 0, json: 0, text: 0, error: 0 };
@@ -977,6 +1368,7 @@ function getHTMLContent() {
         totals.all++;
         if (log.type === 'json') {
           totals.json++;
+          if (log.data.status >= 400) totals.error++;
         } else if (log.type === 'error' || isTextError(log.text)) {
           totals.error++;
         } else {
@@ -1009,7 +1401,9 @@ function getHTMLContent() {
       if (activeFilter === 'json' && log.type !== 'json') return false;
       if (activeFilter === 'text' && (log.type !== 'text' && log.type !== 'error')) return false;
       if (activeFilter === 'error') {
-        const isErr = log.type === 'error' || (log.type === 'text' && isTextError(log.text));
+        const isErr = log.type === 'error' ||
+                      (log.type === 'text' && isTextError(log.text)) ||
+                      (log.type === 'json' && log.data.status >= 400);
         if (!isErr) return false;
       }
       
@@ -1026,35 +1420,40 @@ function getHTMLContent() {
     // Dynamic coloring of raw Morgan & terminal output
     function colorizeText(text) {
       // Colorize morgan request logs
-      // Regex pattern matching: ::ffff:127.0.0.1 - - [19/Jul/2026:12:00:00 +0000] "GET /test HTTP/1.1" 200 458
-      const morganRegex = /^(\\S+) - \\S+ \\[(.*?)\\] "([A-Z]+) (\\S+) (.*?)" (\\d{3}) (\\S+)/;
+      const morganRegex = new RegExp('^(\\\\S+) - \\\\S+ \\\\[(.*?)\\\\] "([A-Z]+) (\\\\S+)(?: (.*?))?" (\\\\d{3}) (\\\\S+)');
       const match = text.match(morganRegex);
       if (match) {
-        const [_, ip, timestamp, method, path, protocol, status, size] = match;
+        const ip = match[1];
+        const timestamp = match[2];
+        const method = match[3];
+        const path = match[4];
+        const protocol = match[5];
+        const status = match[6];
+        const size = match[7];
         let statusClass = 'status-2xx';
         if (status.startsWith('3')) statusClass = 'status-3xx';
         if (status.startsWith('4')) statusClass = 'status-4xx';
         if (status.startsWith('5')) statusClass = 'status-5xx';
         
-        let methodClass = \`method-\${method.toLowerCase()}\`;
+        let methodClass = 'method-' + method.toLowerCase();
         
-        return \`<span class="log-ip">\${ip}</span> \` +
-               \`<span class="log-time">[\${timestamp}]</span> \` +
-               \`"<span class="log-method \${methodClass}">\${method}</span> \` +
-               \`<span class="log-path">\${path}</span> \` +
-               \`<span class="log-proto">\${protocol}</span>" \` +
-               \`<span class="log-status \${statusClass}">\${status}</span> \` +
-               \`<span class="log-size">\${size}</span>\`;
+        return '<span class="log-ip">' + ip + '</span> ' +
+               '<span class="log-time">[' + timestamp + ']</span> ' +
+               '"<span class="log-method ' + methodClass + '">' + method + '</span> ' +
+               '<span class="log-path">' + path + '</span> ' +
+               '<span class="log-proto">' + protocol + '</span>" ' +
+               '<span class="log-status ' + statusClass + '">' + status + '</span> ' +
+               '<span class="log-size">' + size + '</span>';
       }
       
       // Highlight standard listening server strings
       if (text.includes('Listening on ports') || text.includes('listening on port')) {
-        return \`<span class="log-system-info">\${text}</span>\`;
+        return '<span class="log-system-info">' + text + '</span>';
       }
       
       // Highlight stack traces or raw errors in red
       if (isTextError(text)) {
-        return \`<span class="log-system-error">\${text}</span>\`;
+        return '<span class="log-system-error">' + text + '</span>';
       }
       
       return text;
@@ -1068,17 +1467,17 @@ function getHTMLContent() {
         const keys = Object.keys(val);
         if (keys.length === 0) return isArray ? '[]' : '{}';
         
-        let html = \`<span class="json-toggle">\${isArray ? '[' : '{'}</span><ul class="json-collapsible">\`;
+        let html = '<span class="json-toggle">' + (isArray ? '[' : '{') + '</span><ul class="json-collapsible">';
         for (const k of keys) {
-          html += \`<li><span class="json-key">"\${k}"</span>: \${renderJsonVal(val[k])}</li>\`;
+          html += '<li><span class="json-key">"' + k + '"</span>: ' + renderJsonVal(val[k]) + '</li>';
         }
-        html += \`</ul><span>\${isArray ? ']' : '}'}</span>\`;
+        html += '</ul><span>' + (isArray ? ']' : '}') + '</span>';
         return html;
       }
-      if (typeof val === 'string') return \`<span class="json-string">\${JSON.stringify(val)}</span>\`;
-      if (typeof val === 'number') return \`<span class="json-number">\${val}</span>\`;
-      if (typeof val === 'boolean') return \`<span class="json-boolean">\${val}</span>\`;
-      return \`<span class="json-string">\${JSON.stringify(val)}</span>\`;
+      if (typeof val === 'string') return '<span class="json-string">' + JSON.stringify(val) + '</span>';
+      if (typeof val === 'number') return '<span class="json-number">' + val + '</span>';
+      if (typeof val === 'boolean') return '<span class="json-boolean">' + val + '</span>';
+      return '<span class="json-string">' + JSON.stringify(val) + '</span>';
     }
 
     // Append log row to the terminal container
@@ -1104,7 +1503,7 @@ function getHTMLContent() {
       if (log.type === 'text' && isTextError(log.text)) {
         badgeType = 'error';
       }
-      badge.className = \`log-badge \${badgeType}\`;
+      badge.className = 'log-badge ' + badgeType;
       badge.textContent = badgeType === 'error' ? 'error' : log.type;
       meta.appendChild(badge);
       row.appendChild(meta);
@@ -1115,13 +1514,9 @@ function getHTMLContent() {
       if (!toggleWrap.checked) content.style.whiteSpace = 'pre';
       
       if (log.type === 'json') {
-        const method = log.data.method || 'GET';
-        const path = log.data.path || '/';
-        const ip = log.data.ip || '127.0.0.1';
-        
         const summary = document.createElement('div');
         summary.className = 'json-summary';
-        summary.innerHTML = \`[JSON Request] <span class="log-method method-\${method.toLowerCase()}">\${method}</span> <span class="log-path">\${path}</span> from \${ip}\`;
+        summary.innerHTML = buildJsonSummaryHTML(log.data);
         
         const details = document.createElement('div');
         details.className = 'json-details';
@@ -1153,7 +1548,7 @@ function getHTMLContent() {
 
     function updateRenderedCount() {
       const count = terminalBody.querySelectorAll('.log-row').length;
-      renderedCount.textContent = \`Showing \${count} logs\`;
+      renderedCount.textContent = 'Showing ' + count + ' logs';
     }
 
     // Perform a full refresh of logs based on filters
